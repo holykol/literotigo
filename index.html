@@ -1,0 +1,26 @@
+<style>
+   * {
+      font-size: 1em;
+   }
+
+   body {
+      max-width: 800px;
+      margin: 10px auto;
+   }
+
+   pre {
+      white-space: pre-wrap;
+   }
+</style>
+
+<h1>
+   {{ .Meta.Title }}
+   <span style="float: right;">
+      <a href="/?n={{ add .Meta.ID -1 }}">Previous</a> •
+      <a href="/?n={{ add .Meta.ID 1 }}">Next</a>
+   </span>
+</h1>
+
+<pre>
+{{ .Text }}
+</pre>
