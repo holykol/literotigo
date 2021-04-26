@@ -1,0 +1,34 @@
+<style>
+   * {
+      font-size: 1em;
+   }
+
+   html {
+      max-width: 800px;
+      margin: 10px auto;
+   }
+
+   body {
+      margin: 10px;
+   }
+
+   pre {
+      white-space: pre-wrap;
+   }
+</style>
+
+{{ with .Meta }}
+<h1>
+   {{ .Title }}
+   <span style="float: right;">
+      <a href="/view?id={{ add .ID -1 }}">Previous</a> •
+      <a href="/view?id={{ add .ID 1 }}">Next</a>
+   </span>
+</h1>
+
+<kbd><a href="/?tag={{ .Category }}">{{ .Category }}</a> by <a href="/?author={{ .Author }}">{{ .Author }}</a></kbd>
+{{ end }}
+
+<pre>
+{{ .Text }}
+</pre>

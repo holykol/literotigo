@@ -3,24 +3,48 @@
       font-size: 1em;
    }
 
-   body {
-      max-width: 800px;
+   html {
+      max-width: 1000px;
       margin: 10px auto;
    }
 
-   pre {
-      white-space: pre-wrap;
+   body {
+      display: flex;
+      flex-wrap: wrap;
+   }
+
+   .list, .tags {
+      flex: 1
+   }
+
+   .list {
+      min-width: 400px;
+   }
+
+   .tag {
+      display: inline-block;
+      white-space: nowrap;
+      padding: 4px 8px;
+      margin: 5px 1px;
+      color: black;
+      border: 1px solid #727272;
+      border-radius: 20px;
+      text-decoration: none;
    }
 </style>
 
-<h1>
-   {{ .Meta.Title }}
-   <span style="float: right;">
-      <a href="/?n={{ add .Meta.ID -1 }}">Previous</a> •
-      <a href="/?n={{ add .Meta.ID 1 }}">Next</a>
-   </span>
-</h1>
+<div class="list">
+   <h1>{{ .title }}</h1>
 
-<pre>
-{{ .Text }}
-</pre>
+   {{ range .list }}
+   <p><a href="/view?id={{ .ID }}">{{ .Title }}</a></p>
+   {{ end }}
+</div>
+
+<div class="tags">
+   <h1>Tags</h1>
+
+   {{ range $name, $ids := .tags }}
+   <a href="/?tag={{ $name }}" class="tag">{{ $name }}</a>
+   {{ end }}
+</div>
