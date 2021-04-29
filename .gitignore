@@ -1,1 +1,4 @@
 *.jsonl
+*.heap
+*.tar.gz
+literotigo

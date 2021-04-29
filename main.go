@@ -1,8 +1,8 @@
 package main
 
 // TODO build index, searching by tags, author and mb even text
-// TODO parallel indexing testing nix package
-// Goal: low memory consumption. ideally less than 100 megs
+// TODO testing nix package
+// Goal: low memory consumption
 // Goal: Single ~20 loc mmap dependency
 
 import (
@@ -75,26 +75,128 @@ func main() {
 	}
 	defer mmap.Unmap()
 
-	println(len(mmap))
+	idx := buildIndex(mmap)
 
-	r := bytes.NewBuffer(mmap)
+	tmpl := template.Must(template.New("").Funcs(funcs).ParseFS(views, "*"))
 
-	idx := contentIndex{
-		positions:  make([]int, 0),
-		titles:     make(map[int]string),
-		authors:    make(map[string][]int),
-		categories: make(map[string][]int),
+	s := service{
+		tmpl: tmpl,
+		data: mmap,
+		idx:  idx,
 	}
 
-	log.Println("Started indexing")
+	http.HandleFunc("/", s.Index)
+	http.HandleFunc("/view", s.View)
 
-	start := time.Now()
-	pos := 0
+	runtime.GC()
+
+	log.Println("Listening on :8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func buildIndex(file mmap.MMap) contentIndex {
+	var workers = runtime.GOMAXPROCS(0)
+
+	type chunkInfo struct {
+		start int
+		end   int
+	}
+
+	log.Printf("Started indexing using %d workers", workers)
+	startDate := time.Now()
+
+	chunkSize := len(file) / workers
+	chunks := make([]chunkInfo, workers)
+
+	// Distribute work between N workers
+	for i := range chunks {
+		start := chunkSize * i
+
+		// Adjust borders
+		if i > 0 {
+			start = start + bytes.IndexByte(file[start:], byte('\n'))
+			chunks[i-1].end = start + 1
+		}
+
+		chunks[i].start = start
+	}
+
+	chunks[workers-1].end = len(file)
+
+	results := make([]chan contentIndex, workers)
+
+	for n, c := range chunks {
+		results[n] = make(chan contentIndex)
+		go indexWorker(n, file[c.start:c.end], results[n])
+	}
+
+	idx := contentIndex{
+		positions:  []int{},
+		titles:     map[int]string{},
+		authors:    map[string][]int{},
+		categories: map[string][]int{},
+	}
+
+	// Merge results
+	// Kinda ugly
+	for i, c := range results {
+		c := <-c
+
+		start := len(idx.positions) - 1
+		if i == 0 {
+			start = 0
+		}
+
+		for _, pos := range c.positions {
+			idx.positions = append(idx.positions, chunks[i].start+pos)
+		}
+
+		for id, title := range c.titles {
+			idx.titles[start+id] = title
+		}
+
+		for a, ids := range c.authors {
+			for _, id := range ids {
+				idx.authors[a] = append(idx.authors[a], start+id)
+			}
+		}
+
+		for c, ids := range c.categories {
+			for _, id := range ids {
+				idx.categories[c] = append(idx.categories[c], start+id)
+			}
+		}
+	}
+
+	log.Printf(
+		"Finished indexing %d records in %f seconds",
+		len(idx.positions),
+		time.Now().Sub(startDate).Seconds(),
+	)
+
+	return idx
+}
+
+func indexWorker(n int, file []byte, resultChan chan<- contentIndex) {
+	idx := contentIndex{
+		positions:  []int{},
+		titles:     map[int]string{},
+		authors:    map[string][]int{},
+		categories: map[string][]int{},
+	}
+
+	r := bytes.NewBuffer(file)
+
+	var pos int
 
 	for i := 0; ; i++ {
 		l, err := r.ReadString(byte('\n'))
 		if err == io.EOF {
 			break
+		}
+
+		if len(l) == 1 {
+			continue
 		}
 
 		var res struct {
@@ -113,23 +215,7 @@ func main() {
 		pos += len(l)
 	}
 
-	log.Printf("Finished indexing in %f seconds", time.Now().Sub(start).Seconds())
-
-	tmpl := template.Must(template.New("").Funcs(funcs).ParseFS(views, "*"))
-
-	s := service{
-		tmpl: tmpl,
-		data: mmap,
-		idx:  idx,
-	}
-
-	http.HandleFunc("/", s.Index)
-	http.HandleFunc("/view", s.View)
-
-	runtime.GC()
-
-	log.Println("Listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	resultChan <- idx
 }
 
 type service struct {
@@ -205,7 +291,11 @@ func (s *service) View(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := s.idx.positions[id]
-	end := s.idx.positions[id+1]
+
+	end := len(s.data)
+	if int(id)+1 != len(s.idx.positions) {
+		end = s.idx.positions[id+1]
+	}
 
 	var res entry
 	if err := json.Unmarshal(s.data[start:end], &res); err != nil {
