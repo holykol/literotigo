@@ -1,7 +1,8 @@
-image: golang:1.16-alpine
+image: golang:1.16
 
 variables:
-  REPO_NAME: gitlab.com/holykol/literotigo
+  REPO_NAME: github.com/holykol/literotigo
+  GOPROXY: direct
 
 before_script:
   - mkdir -p $GOPATH/src/$(dirname $REPO_NAME)
@@ -13,18 +14,20 @@ stages:
   - build
 
 test:
+  stage: test
   script:
     - go fmt ./...
     - go vet ./...
     - go test -race -coverprofile=cov.out ./...
     - go tool cover -html=cov.out -o coverage.html
-  coverage: '^coverage:\s(\d+(?:\.\d+)?%)'
+  coverage: /coverage:\s(\d+(?:\.\d+)?%)/
   artifacts:
     paths:
-      coverage.html
+      - coverage.html
 
 
 build:
+  stage: build
   script:
     - go build -o $CI_PROJECT_DIR/literotigo
   artifacts:
