@@ -1,14 +1,14 @@
 package main
 
-// TODO build index, searching by tags, author and mb even text
-// TODO testing nix package
+// TODO search by tags, author and mb even text
+// TODO nix package
 // Goal: low memory consumption
 // Goal: Single ~20 loc mmap dependency
 
 import (
 	"bytes"
+	"context"
 	"embed"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -17,8 +17,10 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/edsrzf/mmap-go"
@@ -75,28 +77,37 @@ func main() {
 	}
 	defer mmap.Unmap()
 
-	idx := buildIndex(mmap)
+	workers := runtime.GOMAXPROCS(0)
+	idx := buildIndex(mmap, workers)
 
 	tmpl := template.Must(template.New("").Funcs(funcs).ParseFS(views, "*"))
 
-	s := service{
-		tmpl: tmpl,
-		data: mmap,
-		idx:  idx,
-	}
+	// create and start service
+	s := service{tmpl, mmap, idx}
 
 	http.HandleFunc("/", s.Index)
 	http.HandleFunc("/view", s.View)
 
-	runtime.GC()
+	srv := http.Server{
+		Handler: http.DefaultServeMux,
+		Addr:    ":8080",
+	}
+
+	go func() {
+		// graceful shutdown
+		stop := make(chan os.Signal, 1)
+		signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+		<-stop
+		srv.Shutdown(context.Background())
+	}()
 
 	log.Println("Listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
 }
 
-func buildIndex(file mmap.MMap) contentIndex {
-	var workers = runtime.GOMAXPROCS(0)
-
+func buildIndex(file []byte, workers int) contentIndex {
 	type chunkInfo struct {
 		start int
 		end   int
@@ -137,8 +148,7 @@ func buildIndex(file mmap.MMap) contentIndex {
 		categories: map[string][]int{},
 	}
 
-	// Merge results
-	// Kinda ugly
+	// Merge results. Kinda ugly
 	for i, c := range results {
 		c := <-c
 
@@ -171,7 +181,7 @@ func buildIndex(file mmap.MMap) contentIndex {
 	log.Printf(
 		"Finished indexing %d records in %f seconds",
 		len(idx.positions),
-		time.Now().Sub(startDate).Seconds(),
+		time.Since(startDate).Seconds(),
 	)
 
 	return idx
@@ -220,7 +230,7 @@ func indexWorker(n int, file []byte, resultChan chan<- contentIndex) {
 
 type service struct {
 	tmpl *template.Template
-	data mmap.MMap
+	data []byte
 	idx  contentIndex
 }
 
@@ -254,7 +264,7 @@ func (s *service) Index(w http.ResponseWriter, r *http.Request) {
 			list = append(list, entry{id, s.idx.titles[id]})
 		}
 
-		data["title"] = tag
+		data["title"] = "Tag: " + tag
 		data["list"] = list
 	}
 
@@ -290,10 +300,15 @@ func (s *service) View(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if int(id) > len(s.idx.positions) {
+		s.renderError(w, nil, "invalid id")
+		return
+	}
+
 	start := s.idx.positions[id]
 
 	end := len(s.data)
-	if int(id)+1 != len(s.idx.positions) {
+	if int(id) < len(s.idx.positions)-1 {
 		end = s.idx.positions[id+1]
 	}
 
@@ -311,6 +326,6 @@ func (s *service) View(w http.ResponseWriter, r *http.Request) {
 
 func (s *service) renderError(w http.ResponseWriter, err error, msg string) {
 	e := fmt.Sprintf("%s: %v", msg, err)
-	log.Printf(e)
+	log.Println(e)
 	http.Error(w, e, 500)
 }
