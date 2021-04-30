@@ -2,8 +2,6 @@ package main
 
 // TODO search by tags, author and mb even text
 // TODO nix package
-// Goal: low memory consumption
-// Goal: Single ~20 loc mmap dependency
 
 import (
 	"bytes"
@@ -65,7 +63,6 @@ func main() {
 	}
 
 	log.Printf("Starting literotigo. Opening %s", os.Args[1])
-
 	file, err := os.Open(os.Args[1])
 	if err != nil {
 		log.Fatalf("error opening database: %v", err)
